@@ -1,0 +1,5 @@
+{
+  "name": "Mahabharata Storyboard",
+  "description": "A fully grounded, authentic comic strip generator based on the Mahabharata epic using Gemini 1.5 Pro and Flash.",
+  "requestFramePermissions": []
+}
