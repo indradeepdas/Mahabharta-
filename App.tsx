@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { extractTextFromPDF } from './utils/pdfHelper';
 import { generateStoryboardPlan, generatePanelImage, performFullBookDiscovery } from './services/geminiService';
 import { StoryboardState, AppState, StoryPanel, Character, CharacterStories } from './types';
@@ -22,6 +22,12 @@ Major Events:
 5. The War: An 18-day battle destroys the Kuru lineage. The Pandavas win but at great cost.
 `;
 
+const STORAGE_KEYS = {
+  bookContext: 'mahabharata-book-context',
+  characterIndex: 'mahabharata-character-index',
+  storyboardCache: 'mahabharata-storyboard-cache'
+};
+
 const App = () => {
   const [state, setState] = useState<StoryboardState>({
     panels: [],
@@ -31,15 +37,45 @@ const App = () => {
     error: null,
     selectedCharacterId: undefined,
     characterIndex: {},
+    storyboardCache: {},
     discoveryProgress: 0
   });
   
   const [appMode, setAppMode] = useState<AppState>(AppState.HERO);
   const storyboardRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    try {
+      const cachedContext = localStorage.getItem(STORAGE_KEYS.bookContext);
+      const cachedIndex = localStorage.getItem(STORAGE_KEYS.characterIndex);
+      const cachedStoryboards = localStorage.getItem(STORAGE_KEYS.storyboardCache);
+
+      if (cachedContext && cachedIndex) {
+        setState(prev => ({
+          ...prev,
+          bookContext: cachedContext,
+          characterIndex: JSON.parse(cachedIndex),
+          storyboardCache: cachedStoryboards ? JSON.parse(cachedStoryboards) : {},
+          discoveryProgress: 100
+        }));
+        setAppMode(AppState.CHARACTER_SELECT);
+      }
+    } catch (error) {
+      console.error('Failed to load cached data:', error);
+    }
+  }, []);
+
   const startDiscovery = async (context: string) => {
-    setState(prev => ({ ...prev, bookContext: context, isProcessing: true }));
+    setState(prev => ({
+      ...prev,
+      bookContext: context,
+      isProcessing: true,
+      storyboardCache: {},
+      panels: [],
+      sceneDescription: ''
+    }));
     setAppMode(AppState.INDEXING);
+    localStorage.removeItem(STORAGE_KEYS.storyboardCache);
 
     try {
       const result = await performFullBookDiscovery(context);
@@ -59,10 +95,14 @@ const App = () => {
         };
       });
 
-      setState(prev => ({ 
-        ...prev, 
-        characterIndex: newIndex, 
-        isProcessing: false 
+      localStorage.setItem(STORAGE_KEYS.bookContext, context);
+      localStorage.setItem(STORAGE_KEYS.characterIndex, JSON.stringify(newIndex));
+
+      setState(prev => ({
+        ...prev,
+        characterIndex: newIndex,
+        isProcessing: false,
+        discoveryProgress: 100
       }));
       setAppMode(AppState.CHARACTER_SELECT);
     } catch (err) {
@@ -84,6 +124,28 @@ const App = () => {
 
   const handleGenerateStoryboard = async (prompt: string) => {
     if (!state.bookContext) return;
+    const cachedStoryboard = state.storyboardCache[prompt];
+    if (cachedStoryboard) {
+      const hydratedPanels = cachedStoryboard.map(panel => ({
+        ...panel,
+        isLoadingImage: !panel.imageUrl
+      }));
+      setState(prev => ({
+        ...prev,
+        panels: hydratedPanels,
+        sceneDescription: prompt,
+        isProcessing: false,
+        error: null
+      }));
+      setAppMode(AppState.VIEW);
+      hydratedPanels.forEach(panel => {
+        if (!panel.imageUrl) {
+          handleGeneratePanelImage(panel.id, panel.visualDescription);
+        }
+      });
+      return;
+    }
+
     setState(prev => ({ ...prev, isProcessing: true, sceneDescription: prompt, error: null }));
     setAppMode(AppState.GENERATING);
 
@@ -98,7 +160,14 @@ const App = () => {
         isLoadingImage: true
       }));
 
-      setState(prev => ({ ...prev, panels: initialPanels, isProcessing: false }));
+      const updatedCache = { ...state.storyboardCache, [prompt]: initialPanels };
+      localStorage.setItem(STORAGE_KEYS.storyboardCache, JSON.stringify(updatedCache));
+      setState(prev => ({
+        ...prev,
+        panels: initialPanels,
+        isProcessing: false,
+        storyboardCache: updatedCache
+      }));
       setAppMode(AppState.VIEW);
 
       initialPanels.forEach((panel) => {

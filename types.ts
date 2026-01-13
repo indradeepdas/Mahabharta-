@@ -36,6 +36,7 @@ export interface StoryboardState {
   selectedCharacterId?: string;
   // This is our central "Saved" database for the current book
   characterIndex: Record<string, CharacterStories>;
+  storyboardCache: Record<string, StoryPanel[]>;
   discoveryProgress: number; // 0 to 100
 }
 
